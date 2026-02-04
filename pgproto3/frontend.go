@@ -91,40 +91,64 @@ func (f *Frontend) Send(msg FrontendMessage) {
 	}
 }
 
-// firstSimpleQuerySQLPreview scans the wire buffer for the first 'Q' (Simple query) message
-// and returns the first maxRunes runes of the query string, or "" if none.
-func firstSimpleQuerySQLPreview(buf []byte, maxRunes int) string {
+// firstQuerySQLPreview scans the wire buffer for the first 'Q' (Simple query) or 'P' (Parse)
+// message and returns the first maxRunes runes of the query string, or "" if none.
+func firstQuerySQLPreview(buf []byte, maxRunes int) string {
 	pos := 0
 	for pos+5 <= len(buf) {
 		msgType := buf[pos]
 		msgLen := binary.BigEndian.Uint32(buf[pos+1 : pos+5])
-		if msgType == 'Q' {
-			bodyLen := int(msgLen) - 4
-			if bodyLen <= 0 {
-				break
-			}
-			bodyEnd := pos + 5 + bodyLen
-			if bodyEnd > len(buf) {
-				break
-			}
-			body := buf[pos+5 : bodyEnd]
+		bodyLen := int(msgLen) - 4
+		if bodyLen <= 0 {
+			pos += 1 + int(msgLen)
+			continue
+		}
+		bodyEnd := pos + 5 + bodyLen
+		if bodyEnd > len(buf) {
+			break
+		}
+		body := buf[pos+5 : bodyEnd]
+
+		var query []byte
+		switch msgType {
+		case 'Q':
+			// Simple query: body is single null-terminated query string
 			end := bytes.IndexByte(body, 0)
 			if end < 0 {
 				end = len(body)
 			}
-			query := body[:end]
-			// take first maxRunes runes
-			s := string(query)
-			var n int
-			for i := range s {
-				if n >= maxRunes {
-					return s[:i]
-				}
-				n++
+			query = body[:end]
+		case 'P':
+			// Parse: body is statement_name\0 + query_string\0 + int16 num_params + OIDs...
+			stmtEnd := bytes.IndexByte(body, 0)
+			if stmtEnd < 0 || stmtEnd >= len(body)-1 {
+				pos += 1 + int(msgLen)
+				continue
 			}
-			return s
+			queryStart := stmtEnd + 1
+			queryEnd := bytes.IndexByte(body[queryStart:], 0)
+			if queryEnd < 0 {
+				queryEnd = len(body) - queryStart
+			}
+			query = body[queryStart : queryStart+queryEnd]
+		default:
+			pos += 1 + int(msgLen)
+			continue
 		}
-		pos += 1 + int(msgLen)
+
+		if len(query) == 0 {
+			pos += 1 + int(msgLen)
+			continue
+		}
+		s := string(query)
+		var n int
+		for i := range s {
+			if n >= maxRunes {
+				return s[:i]
+			}
+			n++
+		}
+		return s
 	}
 	return ""
 }
@@ -141,7 +165,7 @@ func (f *Frontend) Flush() error {
 		return nil
 	}
 
-	sqlPreview := firstSimpleQuerySQLPreview(f.wbuf, 20)
+	sqlPreview := firstQuerySQLPreview(f.wbuf, 20)
 	log.Printf("pgproto3: flush send (%d bytes), SQL preview: %q", len(f.wbuf), sqlPreview)
 
 	n, err := f.w.Write(f.wbuf)
