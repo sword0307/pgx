@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 )
 
 // Frontend acts as a client for the PostgreSQL wire protocol version 3.
@@ -102,6 +103,12 @@ func (f *Frontend) Flush() error {
 		return nil
 	}
 
+	previewLen := 20
+	if len(f.wbuf) < previewLen {
+		previewLen = len(f.wbuf)
+	}
+	log.Printf("pgproto3: flush send (preview %d bytes): %q", len(f.wbuf), f.wbuf[:previewLen])
+
 	n, err := f.w.Write(f.wbuf)
 
 	const maxLen = 1024
@@ -115,6 +122,7 @@ func (f *Frontend) Flush() error {
 		return &writeError{err: err, safeToRetry: n == 0}
 	}
 
+	log.Printf("pgproto3: flush done (%d bytes)", n)
 	return nil
 }
 
