@@ -116,7 +116,7 @@ func firstSimpleQuerySQLPreview(buf []byte, maxRunes int) string {
 			// take first maxRunes runes
 			s := string(query)
 			var n int
-			for i, r := range s {
+			for i := range s {
 				if n >= maxRunes {
 					return s[:i]
 				}
