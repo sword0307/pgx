@@ -169,7 +169,7 @@ func (f *Frontend) Flush() error {
 	log.Printf("pgproto3: flush send (%d bytes), SQL preview: %q", len(f.wbuf), sqlPreview)
 
 	n, err := f.w.Write(f.wbuf)
-	log.Printf("pgproto3: flush done (%d bytes), SQL preview: %q", n, sqlPreview)
+	log.Printf("pgproto3: flush done (%d bytes), SQL preview: %q, err: %v", n, sqlPreview, err)
 
 	const maxLen = 1024
 	if len(f.wbuf) > maxLen {
