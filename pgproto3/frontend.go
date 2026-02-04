@@ -91,6 +91,44 @@ func (f *Frontend) Send(msg FrontendMessage) {
 	}
 }
 
+// firstSimpleQuerySQLPreview scans the wire buffer for the first 'Q' (Simple query) message
+// and returns the first maxRunes runes of the query string, or "" if none.
+func firstSimpleQuerySQLPreview(buf []byte, maxRunes int) string {
+	pos := 0
+	for pos+5 <= len(buf) {
+		msgType := buf[pos]
+		msgLen := binary.BigEndian.Uint32(buf[pos+1 : pos+5])
+		if msgType == 'Q' {
+			bodyLen := int(msgLen) - 4
+			if bodyLen <= 0 {
+				break
+			}
+			bodyEnd := pos + 5 + bodyLen
+			if bodyEnd > len(buf) {
+				break
+			}
+			body := buf[pos+5 : bodyEnd]
+			end := bytes.IndexByte(body, 0)
+			if end < 0 {
+				end = len(body)
+			}
+			query := body[:end]
+			// take first maxRunes runes
+			s := string(query)
+			var n int
+			for i, r := range s {
+				if n >= maxRunes {
+					return s[:i]
+				}
+				n++
+			}
+			return s
+		}
+		pos += 1 + int(msgLen)
+	}
+	return ""
+}
+
 // Flush writes any pending messages to the backend (i.e. the server).
 func (f *Frontend) Flush() error {
 	if err := f.encodeError; err != nil {
@@ -103,13 +141,11 @@ func (f *Frontend) Flush() error {
 		return nil
 	}
 
-	previewLen := 20
-	if len(f.wbuf) < previewLen {
-		previewLen = len(f.wbuf)
-	}
-	log.Printf("pgproto3: flush send (preview %d bytes): %q", len(f.wbuf), f.wbuf[:previewLen])
+	sqlPreview := firstSimpleQuerySQLPreview(f.wbuf, 20)
+	log.Printf("pgproto3: flush send (%d bytes), SQL preview: %q", len(f.wbuf), sqlPreview)
 
 	n, err := f.w.Write(f.wbuf)
+	log.Printf("pgproto3: flush done (%d bytes), SQL preview: %q", n, sqlPreview)
 
 	const maxLen = 1024
 	if len(f.wbuf) > maxLen {
@@ -122,7 +158,6 @@ func (f *Frontend) Flush() error {
 		return &writeError{err: err, safeToRetry: n == 0}
 	}
 
-	log.Printf("pgproto3: flush done (%d bytes)", n)
 	return nil
 }
 
